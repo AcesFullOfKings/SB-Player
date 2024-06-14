@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Player with SponsorBlock Integration</title>
+</head>
+<body>
+    <h1>Select and Play a Local Video</h1>
+    <input type="file" id="filePicker" accept="video/*">
+    <br><br>
+    <video id="videoPlayer" controls width="640" height="360">
+        Your browser does not support the video tag.
+    </video>
+
+    <script>
+        const filePicker = document.getElementById('filePicker');
+        const videoPlayer = document.getElementById('videoPlayer');
+        let sponsorSegments = [];
+        let mergedSegments = [];
+        let currentSegmentIndex = 0;
+
+        filePicker.addEventListener('change', async function(event) {
+            const file = event.target.files[0];
+            if (file) {
+                const fileName = file.name;
+                const videoID = extractVideoID(fileName);
+                if (videoID) {
+                    sponsorSegments = await fetchSponsorSegments(videoID);
+                    mergedSegments = mergeSegments(sponsorSegments);
+                    currentSegmentIndex = 0;
+                }
+
+                const url = URL.createObjectURL(file);
+                videoPlayer.src = url;
+                videoPlayer.load();
+                videoPlayer.play();
+            }
+        });
+
+        videoPlayer.addEventListener('timeupdate', function() {
+            if (currentSegmentIndex < mergedSegments.length) {
+                const currentTime = videoPlayer.currentTime;
+                const currentSegment = mergedSegments[currentSegmentIndex];
+
+                if (currentTime >= currentSegment[0] && currentTime < currentSegment[1]) {
+                    videoPlayer.currentTime = currentSegment[1];
+                    currentSegmentIndex++;
+                }
+            }
+        });
+
+        videoPlayer.addEventListener('seeked', function() {
+            const currentTime = videoPlayer.currentTime;
+            // Recalculate the current segment index based on the current playback time
+            currentSegmentIndex = mergedSegments.findIndex(segment => currentTime < segment[1]);
+            if (currentSegmentIndex === -1) {
+                currentSegmentIndex = mergedSegments.length; // No more segments to skip
+            }
+        });
+
+        function extractVideoID(filename) {
+            const match = filename.match(/\[([a-zA-Z0-9_-]{11})\]/);
+            return match ? match[1] : null;
+        }
+
+        async function fetchSponsorSegments(videoID) {
+            const url = new URL('https://sponsor.ajay.app/api/skipSegments');
+            url.searchParams.append('videoID', videoID);
+            const categories = JSON.stringify(['intro', 'outro', 'filler', 'sponsor', 'preview', 'selfpromo', 'interaction']);
+            url.searchParams.append('categories', categories);
+
+            try {
+                const response = await fetch(url);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const data = await response.json();
+                return data;
+            } catch (error) {
+                console.error('Failed to fetch sponsor segments:', error);
+                return [];
+            }
+        }
+
+        function mergeSegments(segments) {
+            if (segments.length === 0) return [];
+            
+            // Sort segments by start time
+            segments.sort((a, b) => a.segment[0] - b.segment[0]);
+            
+            const merged = [];
+            let current = segments[0].segment.slice(); // Copy first segment
+            
+            for (let i = 1; i < segments.length; i++) {
+                const next = segments[i].segment;
+                
+                if (current[1] >= next[0]) {
+                    // Overlapping or contiguous segments, merge them
+                    current[1] = Math.max(current[1], next[1]);
+                } else {
+                    // No overlap, push the current segment and start a new one
+                    merged.push(current);
+                    current = next.slice();
+                }
+            }
+            
+            // Push the last segment
+            merged.push(current);
+            
+            return merged;
+        }
+    </script>
+</body>
+</html>
